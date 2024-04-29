@@ -7,7 +7,7 @@ namespace SkillAnalyst.Merger;
 
 public static class JobSkillMerger
 {
-    public static void MergeAndSaveAsync(List<ImportedJobSkill> skills, List<ImportedJobSummary> summaries, string databaseFilePath)
+    public static List<MergedJobSkills> MergeAndSaveAsync(List<ImportedJobSkill> skills, List<ImportedJobSummary> summaries, string databaseFilePath)
     {
         using var db = new LiteDatabase(databaseFilePath);
         var collection = db.GetCollection<MergedJobSkills>("jobs");
@@ -26,17 +26,6 @@ public static class JobSkillMerger
         }
 
         Log.Information($"Finished process with {entries} entries");
-        mergedJobs = mergedJobs.DistinctBy(j => j.JobLink).ToList();
-
-        const int batchSize = 1000;
-        var batches = mergedJobs.Batch(batchSize);
-        var savedJobs = 0;
-
-        foreach (var batch in batches)
-        {
-            savedJobs += batch.Length;
-            Log.Information($"Saved {savedJobs} jobs to database");
-            collection.InsertBulk(batch);
-        }
+        return mergedJobs.DistinctBy(j => j.JobLink).ToList();
     }
 }

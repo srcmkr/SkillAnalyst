@@ -1,32 +1,33 @@
 ﻿using System.Net.Http.Json;
 using LiteDB;
+using Newtonsoft.Json;
 using Serilog;
 using SkillAnalyst.Models;
 
 namespace SkillAnalyst.LLM;
 
-public class LocalLLM
+public static class LocalLlm
 {
-    public static async Task EnrichAndSaveAsync(string databaseFilePath)
+    public static async Task EnrichAndSaveAsync(List<MergedJobSkills> mergedSkills, string requestUrl, string databaseFilePath)
     {
         using var db = new LiteDatabase(databaseFilePath);
         var collection = db.GetCollection<MergedJobSkills>("jobs");
+        var skillSet = new HashSet<string>();
         
         var entries = 0;
 
         var preprompt =
             """
-            You are a skill management expert. You have been hired by a company to analyze the required skills for jobs. You have been given a database of job descriptions and skills. Your task is to analyze the skills required for each job and provide a list of skills for each job. You will be paid based on the number of jobs.
-            Because you're an expert, you merge similar skills together. For example, if you see 'Python' and 'Python 3', you merge them into 'Python'. The same goes for '.NET/C#' and '.NET Core 3.1', you'll merge to ".NET" You also remove any skills that are not relevant to the job or very common. For example, if you see 'Microsoft Word' in a job description, you remove it.
-            Your output format is strict. You just provide a comma-separated list of skills for each job. You must not provide any other information. Any other format than the comma-separated list will destroy the dataset and you will not be paid.
-            Here is the job description and the the skills an intern found out:  
+            Extract primary skills from job descriptions, merging similar ones. For example, 'Python' and 'Python 3' become 'Python'. Similarly, '.NET/C#' and '.NET Core 3.1' merge into '.NET'. 'Project Management' and 'Project Manager' merge to 'Project Management'.
+            Use the more general skill. Only include skills from the job description; do not add extra ones or add 'skill' to a skill. For example, 'Communication Skills' should be 'Communication'.
+            Output format: Comma-separated list of skills per job, no additional information.
+            Example output: "Python, SQL, Project Management, .NET, PHP, Ruby, Documentation, Accounting Software, System Testing".
+            Here's the job description and the skills discovered by an intern:
             """;
-        
-        var requestUrl = "http://localhost:1234/v1/chat/completions";
 
         using var httpClient = new HttpClient();
         
-        foreach (var job in collection.FindAll())
+        foreach (var job in mergedSkills)
         {
             entries++;
             if (entries % 100 == 0) Log.Information($"Processed {entries} entries so far");
@@ -41,7 +42,7 @@ public class LocalLLM
                     Messages = [
                         new LmMessage
                         {
-                            Role = "user",
+                            Role = "system",
                             Content = preprompt
                         },
                         new LmMessage
@@ -55,15 +56,43 @@ public class LocalLLM
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    
-                    //TODO: Parse responseContent and update job.LlmSkills
-                    //for now: just flush the responseContent to the log
-                    Log.Warning(responseContent);
+                    var responseJson = JsonConvert.DeserializeObject<LmStudioResponse>(responseContent);
+
+                    if (responseJson != null)
+                    {
+                        var firstSkill = responseJson.Choices.FirstOrDefault();
+                        if (firstSkill?.Message == null)
+                        {
+                            Log.Fatal($"No response from LLM for {responseContent}");
+                        } else
+                        {
+                            var skills = firstSkill.Message.Content;
+                            var skillList = skills.Split(',').Select(s => s.Trim()).ToList();
+                            
+                            if (skillList.Count != 0)
+                            {
+                                foreach (var skill in skillList) skillSet.Add(skill);
+                                // write skill to file, append if file exists, one skill per line
+                                await File.AppendAllLinesAsync("enriched_skills_wip.txt", skillList);
+                            }
+                            
+                            Log.Information("Unique skills so far: " + skillSet.Count);
+                        }
+                    }
+                    else
+                    {
+                        Log.Fatal($"Failed to deserialize response from LLM: {responseContent}");
+                    }
                 }
             }
-
         }
+        Log.Information($"Finished process with {entries} entries. Saving enriched skills to file.");
         
-        Log.Information($"Finished process with {entries} entries");
+        // Save the enriched skills back to a file, one skill per line
+        var enrichedSkills = skillSet.ToList();
+        enrichedSkills.Sort();
+        await File.WriteAllLinesAsync("enriched_skills_full.txt", enrichedSkills);
+        
+        Log.Information("Enriched skills saved to file");
     }
 }
