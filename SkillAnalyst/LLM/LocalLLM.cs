@@ -1,6 +1,5 @@
 ﻿using System.Net.Http.Json;
 using LiteDB;
-using Newtonsoft.Json;
 using Serilog;
 using SkillAnalyst.Models;
 
