@@ -1,0 +1,9 @@
+.vs/
+.vscode/
+.idea/
+SkillAnalyst/bin/
+SkillAnalyst/obj/
+SkillAnalyst/job_skills.csv
+SkillAnalyst/job_summary.csv
+SkillAnalyst/merged_jobs.db
+SkillAnalyst/merged_jobs-log.db
